@@ -44,11 +44,13 @@ class ParserEurotorg:
 
     def __init__(self) -> None:
         self.options = ChromeOptions()
-        self.options.add_argument('headless')
+        self.options.add_argument('--no-sandbox')
+        self.options.headless = True
         self.driver = Chrome(options=self.options)
     
     def get_price(self, html, flag):
-        #TO DO may be add first enter to __init__
+        #TODO: may be add first enter to __init__
+        # FIXME kjlkdfldkjf
         self.driver.get(html)
         #time.sleep(1)
         if flag:
@@ -64,7 +66,8 @@ class ParserEurotorg:
 class ParserInfo:
     def __init__(self) -> None:
         # self.options = ChromeOptions()
-        # self.options.add_argument('headless')
+        # self.options.add_argument('--no-sandbox')
+        # self.options.headless = True
         # self.driver = Chrome(options=self.options)
         self.driver = Chrome()
         
@@ -72,9 +75,10 @@ class ParserInfo:
     def get_price(self, html):
 
         self.driver.get(html)
-        time.sleep(3)
+        time.sleep(5)
         list_price = []
         list_net = []
+        name = self.driver.find_element(By.CSS_SELECTOR, "div.description").find_element(By.CSS_SELECTOR, 'div.max-height').text()
         nets = self.driver.find_elements(By.XPATH, "//div[@class='logo']//img")[1:]
         prices = self.driver.find_elements(By.CSS_SELECTOR, 'div.price-volume')
         for net, price in zip(nets, prices):
@@ -82,4 +86,4 @@ class ParserInfo:
             list_price.append(price.text)
             list_net.append(net.get_attribute('alt'))
         #print(price)
-        return dict(zip(list_net, list_price))
+        return name, dict(zip(list_net, list_price))

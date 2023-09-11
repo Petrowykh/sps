@@ -14,11 +14,17 @@ import time
 
 def info():
     infoprice = mp.ParserInfo()
-    link = 'https://infoprice.by/?search=4810112010516'
-    st.text(link)
-    st.title('Вода минеральная "Darida" лечебно-столовая газ. 1.5л РБ')
-    rrr = infoprice.get_price(link)
-    st.table(rrr)
+    barcode = st.sidebar.text_input('Введите ш/к')
+    if st.sidebar.button('Ищем'):
+        link = 'https://infoprice.by/?search=' + barcode
+        st.text(link)
+        
+        name, rrr = infoprice.get_price(link)
+        if name != None:
+            st.subheader(name)
+            st.table(rrr)
+        else:
+            st.subheader('Товар не найден')
     
     
 
@@ -37,7 +43,11 @@ def reports():
                    ['ГИППО', 'Евроторг', 'Санта'])
     sku['gippo_price'] = 0
     sku['eurotorg_price'] = 0
-    if st.sidebar.button('Сформировать'):
+    email = st.sidebar.text_input('Введите email', placeholder='email@mail.ru')
+    email_flag = True
+    if email:
+        email_flag = False
+    if st.sidebar.button('Сформировать', disabled=email_flag):
         gippo = mp.ParserGippo()
         
         links = sku['gippo']
@@ -71,7 +81,7 @@ def reports():
         ready_excel = sku[['code', 'name', 'gippo_price', 'eurotorg_price']]
         ready_excel.to_excel('ready.xlsx')
         parse_bar.progress(int(100), 'Готово!')
-        mu.send_letter('an-26@inbox.ru', 'ready.xlsx')
+        mu.send_letter(email, 'ready.xlsx')
         st.success('Все хорошо')
 
 
