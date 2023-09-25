@@ -40,6 +40,32 @@ class ParserGippo(Parse):
             price = 0
         return price
     
+class ParserGippoVery(Parse):
+
+    def get_last_page(self, html):
+        soup = bs4.BeautifulSoup(html, 'lxml')
+        last_page = soup.find_all("a",{"class":"pagination__link"})[-2].text.strip()
+        return int(last_page)
+
+    def get_links(self, html):
+        list_name = []
+        list_price = []
+        list_barcode = []
+        soup = bs4.BeautifulSoup(html, 'lxml')
+        links = soup.find_all('div', class_="product-card__container")
+        for link in links:
+            barcode = link.find('a').get("href").split('-')[-1][:-1]
+            
+            name = link.find('a', class_="title js-call-modal title_notifier").text.strip()
+            price = link.find('div', class_="price").text.split(' ')[0]
+            list_barcode.append(barcode)
+            list_name.append(name)
+            list_price.append(price)
+        return list_barcode, list_name, list_price
+            
+
+
+    
 class ParserEurotorg:
 
     def __init__(self) -> None:
@@ -87,3 +113,41 @@ class ParserInfo:
             list_net.append(net.get_attribute('alt'))
         #print(price)
         return name, dict(zip(list_net, list_price))
+    
+class ParserInfoAll:
+
+    def __init__(self) -> None:
+        self.options = ChromeOptions()
+        self.options.add_argument('--no-sandbox')
+        self.options.headless = True
+        self.driver = Chrome(options=self.options)
+        self.driver = Chrome()
+        
+
+    def get_price(self, html):
+
+        self.driver.get(html)
+        time.sleep(5)
+        list_price = []
+        list_net = []
+        list_date = []
+        try:
+            error = self.driver.find_element(By.CSS_SELECTOR, 'div.text-not-found')
+            flag_error = False
+        except:
+            flag_error = True
+        if flag_error:
+            name = self.driver.find_element(By.CSS_SELECTOR, 'div.max-height')
+            
+            nets = self.driver.find_elements(By.XPATH, "//div[@class='logo']//img")[1:]
+            prices = self.driver.find_elements(By.CSS_SELECTOR, 'div.price-volume')
+            dates = self.driver.find_elements(By.CSS_SELECTOR, 'div.adress-head-item')
+            for net, price, date in zip(nets, prices, dates):
+                
+                list_price.append(price.text)
+                list_net.append(net.get_attribute('alt'))
+                list_date.append(date.text)
+            #print(price)
+            return name.text, dict(zip(list_net, list_price)), dict(zip(list_net, list_date))
+        else:
+            return 'Не найден', 0, 0
