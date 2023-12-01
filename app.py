@@ -89,7 +89,7 @@ def info():
 def reports():
     parse_bar = st.progress(0, 'Начинаем парсинг')
     
-    sku = mu.load_sku('excel/top22.xlsx').fillna('')
+    sku = mu.load_sku('excel/new1.xlsx').fillna('')
     #st.table(sku)
     part_of_parse = 100/sku.shape[0]
     st.sidebar.title('Отчеты')
@@ -100,15 +100,17 @@ def reports():
     email = st.sidebar.text_input('Введите email', placeholder='email@mail.ru')
     if st.sidebar.button('Сформировать'):
         if type_report == 'TOP-1000':
-            result_dict = {'name':[],'barcode':[],'sosedi':[],'sosedi_date':[],'santa':[],'santa_date':[],'korona':[],'korona_date':[],'evroopt':[],'evroopt_date':[],'gippo':[],'gippo_date':[],'grin':[],'grin_date':[]}
+            result_dict = {'name':[],'barcode':[], 'link_foto':[], 'min_price':[], 'sosedi':[],'sosedi_date':[],'santa':[],'santa_date':[],'korona':[],'korona_date':[],'evroopt':[],'evroopt_date':[],'gippo':[],'gippo_date':[],'grin':[],'grin_date':[]}
             infoprice = mp.ParserInfoAll()
             barcodes = sku['barcode']
             for count, barcode in enumerate(barcodes):
                 parse_bar.progress(int(count*part_of_parse))
                 link = 'https://infoprice.by/?search=' + str(int(barcode)) + '&filter%5B%5D=72494&filter%5B%5D=72468&filter%5B%5D=72512&filter%5B%5D=72517&filter%5B%5D=72511&filter%5B%5D=72526'
-                name, rrr, ddd = infoprice.get_price(link)
+                name, min_price, rrr, ddd = infoprice.get_price(link)
                 if name != 'Не найден':
                     result_dict['name'].append(name)
+                    result_dict['link_foto'].append(link)
+                    result_dict['min_price'].append(min_price)
                     result_dict['barcode'].append(str(int(barcode)))
                     result_dict['sosedi'].append(rrr.get('Соседи'))
                     result_dict['sosedi_date'].append(ddd.get('Соседи'))
@@ -123,7 +125,7 @@ def reports():
                     result_dict['grin'].append(rrr.get('Грин'))
                     result_dict['grin_date'].append(ddd.get('Грин'))
             result_df = pd.DataFrame.from_dict(result_dict)
-            result_df = result_df.fillna(0)
+            result_df = result_df.fillna(0.0)
             result_df.to_excel('ready.xlsx')
             st.table(result_df)
         else:

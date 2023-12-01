@@ -127,7 +127,7 @@ class ParserInfoAll:
     def get_price(self, html):
 
         self.driver.get(html)
-        time.sleep(5)
+        time.sleep(2)
         list_price = []
         list_net = []
         list_date = []
@@ -144,10 +144,11 @@ class ParserInfoAll:
             dates = self.driver.find_elements(By.CSS_SELECTOR, 'div.adress-head-item')
             for net, price, date in zip(nets, prices, dates):
                 
-                list_price.append(price.text)
+                list_price.append(float(price.text))
                 list_net.append(net.get_attribute('alt'))
                 list_date.append(date.text)
             #print(price)
-            return name.text, dict(zip(list_net, list_price)), dict(zip(list_net, list_date))
+            #print (min(list_price))
+            return name.text, min(list_price), dict(zip(list_net, list_price)), dict(zip(list_net, list_date))
         else:
-            return 'Не найден', 0, 0
+            return 'Не найден', 0.0, 0.0, ''
