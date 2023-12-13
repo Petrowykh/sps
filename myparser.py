@@ -6,6 +6,9 @@ import logging, urllib3, time
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver import ChromeOptions, Chrome
+from selenium.webdriver.common.alert import Alert
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 
 logging.basicConfig(filename="parse.log", level=logging.INFO, filemode='w')
 urllib3.disable_warnings()
@@ -117,11 +120,23 @@ class ParserInfo:
 class ParserInfoAll:
 
     def __init__(self) -> None:
+        print('init parser')
         self.options = ChromeOptions()
         self.options.add_argument('--no-sandbox')
-        self.options.headless = True
+        self.options.add_argument('--headless')
+        
         self.driver = Chrome(options=self.options)
-        self.driver = Chrome()
+        
+        self.driver_promo = Chrome(options=self.options)
+        self.driver.get('https://infoprice.by/')
+        time.sleep(3)
+        albums =  self.driver.find_element(By.CLASS_NAME,'form-search')
+        albums.click()
+        time.sleep(2)
+        #<button type="button" class="btn btn-primary">Да</button>
+        self.driver.find_element(By.CLASS_NAME,'btn-primary').click()
+        
+
         
 
     def get_price(self, html):
@@ -130,7 +145,7 @@ class ParserInfoAll:
         time.sleep(2)
         list_price = []
         list_net = []
-        list_date = []
+        list_promo = [10000.0]
         try:
             error = self.driver.find_element(By.CSS_SELECTOR, 'div.text-not-found')
             flag_error = False
@@ -141,14 +156,30 @@ class ParserInfoAll:
             
             nets = self.driver.find_elements(By.XPATH, "//div[@class='logo']//img")[1:]
             prices = self.driver.find_elements(By.CSS_SELECTOR, 'div.price-volume')
-            dates = self.driver.find_elements(By.CSS_SELECTOR, 'div.adress-head-item')
-            for net, price, date in zip(nets, prices, dates):
+            #dates = self.driver.find_elements(By.CSS_SELECTOR, 'div.adress-head-item')
+            for net, price in zip(nets, prices):
                 
                 list_price.append(float(price.text))
                 list_net.append(net.get_attribute('alt'))
-                list_date.append(date.text)
-            #print(price)
-            #print (min(list_price))
-            return name.text, min(list_price), dict(zip(list_net, list_price)), dict(zip(list_net, list_date))
+                
+            self.driver_promo.get(html+'&promoPrice=1')
+            time.sleep(2)
+            
+            try:
+                flag_promo = False
+                error = self.driver_promo.find_element(By.CSS_SELECTOR, 'div.text-not-found')
+            
+            except:
+                flag_promo = True
+                
+            if flag_promo:
+                prices = self.driver_promo.find_elements(By.CSS_SELECTOR, 'div.price-volume')
+                
+                for net, price in zip(nets, prices):
+                    list_promo.append(float(price.text))
+                
+            print(name.text)
+            
+            return name.text, min(list_price), min(list_promo), dict(zip(list_net, list_price))
         else:
-            return 'Не найден', 0.0, 0.0, ''
+            return 'Не найден', 0.0, 0.0, 0.0

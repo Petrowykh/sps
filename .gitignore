@@ -51,6 +51,9 @@ ENV/
 env.bak/
 venv.bak/
 
+/excel
+/123
+ready*
 
 # mypy
 .mypy_cache/
