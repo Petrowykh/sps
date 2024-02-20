@@ -90,7 +90,7 @@ def info():
 def reports():
     parse_bar = st.progress(0, 'Начинаем парсинг')
     
-    sku = mu.load_sku('excel/new2.xlsx').fillna('')
+    sku = mu.load_sku('excel/new3.xlsx').fillna('')
     #st.table(sku)
     part_of_parse = 100/sku.shape[0]
     st.sidebar.title('Отчеты')
@@ -133,7 +133,7 @@ def reports():
                     #result_dict['grin_date'].append(ddd.get('Грин'))
             result_df = pd.DataFrame.from_dict(result_dict)
             result_df = result_df.fillna(0.0)
-            result_df.to_excel('ready.xlsx')
+            result_df.to_excel('ready20_1.xlsx')
             st.table(result_df)
         else:
             gippo = mp.ParserGippoVery()

@@ -4,7 +4,7 @@ from pathlib import Path
 
 def load_sku(file_name):
     df = pd.read_excel(file_name)
-    return df
+    return df[100:200]
 
 def send_letter(receivers, file):
     gmail = EmailSender(

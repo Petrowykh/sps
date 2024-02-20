@@ -129,10 +129,10 @@ class ParserInfoAll:
         
         self.driver_promo = Chrome(options=self.options)
         self.driver.get('https://infoprice.by/')
-        time.sleep(3)
+        time.sleep(2)
         albums =  self.driver.find_element(By.CLASS_NAME,'form-search')
         albums.click()
-        time.sleep(2)
+        time.sleep(1)
         #<button type="button" class="btn btn-primary">Да</button>
         self.driver.find_element(By.CLASS_NAME,'btn-primary').click()
         
@@ -142,7 +142,7 @@ class ParserInfoAll:
     def get_price(self, html):
 
         self.driver.get(html)
-        time.sleep(2)
+        time.sleep(1)
         list_price = []
         list_net = []
         list_promo = [10000.0]
@@ -163,7 +163,7 @@ class ParserInfoAll:
                 list_net.append(net.get_attribute('alt'))
                 
             self.driver_promo.get(html+'&promoPrice=1')
-            time.sleep(2)
+            time.sleep(1)
             
             try:
                 flag_promo = False
@@ -179,7 +179,7 @@ class ParserInfoAll:
                     list_promo.append(float(price.text))
                 
             print(name.text)
-            
+            #self.driver.close()
             return name.text, min(list_price), min(list_promo), dict(zip(list_net, list_price))
         else:
             return 'Не найден', 0.0, 0.0, 0.0
