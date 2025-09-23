@@ -10,38 +10,23 @@ import myparser as mp
 #import myutils as mu
 
 # ----------  AUTH  ----------
-USERS_FILE = Path("users.txt")   # login:hash  (одна строка – один пользователь)
+# ---------- ВРЕМЕННО: захардкожены ----------
+LOGIN = "admin"
+PASSWORD = "12345"
+# ---------------------------------------------
 
-def _load_users() -> dict[str, str]:
-    """{login: password}"""
-    if not USERS_FILE.exists():
-        # создаём демо-запись
-        USERS_FILE.write_text("demo:123\n")
-    users = {}
-    for line in USERS_FILE.read_text().splitlines():
-        if ":" in line:
-            login, pwd = line.strip().split(":", 1)
-            users[login] = pwd
-    return users
-
-def check_password(login: str, password: str) -> bool:
-    """Проверка без шифрования."""
-    users = _load_users()
-    return users.get(login) == password
+def check_password(pw: str) -> bool:
+    return pw == PASSWORD
 
 def login_form():
-    """Показывает форму логина. При успехе ставит st.session_state['auth']=True"""
-    st.title("Вход в систему")
     with st.form("login"):
-        login = st.text_input("Логин")
-        pwd   = st.text_input("Пароль", type="password")
+        pw = st.text_input("Пароль", type="password")
         if st.form_submit_button("Войти"):
-            if check_password(login, pwd):
+            if check_password(pw):
                 st.session_state["auth"] = True
-                st.session_state["user"] = login
                 st.rerun()
             else:
-                st.error("Неверный логин или пароль")
+                st.error("Неверный пароль")
 
 # ----------  UI  ----------
 def info():
