@@ -4,6 +4,8 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
+import datetime, pathlib, gc
+from api_report import build_api_report, post_merge
 from pathlib import Path
 
 import myparser as mp
@@ -55,11 +57,7 @@ def info():
             st.error(f'Ошибка при поиске товара: {str(e)}')
 
 def reports():
-    st.sidebar.title('Отчеты')
-    # type_report = st.sidebar.selectbox('Выберите отчет', ('TOP-1000', 'CTM'))
-    # email = st.sidebar.text_input('Введите email', placeholder='email@mail.ru')
-    if not st.sidebar.button('Сформировать'):
-        return
+
     try:
         sku = pd.read_excel('excel/new3.xlsx')
         if sku.empty:
@@ -103,8 +101,9 @@ def reports():
                 continue
         infoprice.close()
         result_df = pd.DataFrame.from_dict(result_dict).fillna(0.0)
-        filename = f"report_{datetime.now().strftime('%d%m%Y_%H%M')}.xlsx"
-        result_df.to_excel(filename)
+        filename = f"report_{datetime.now().strftime('%d%m%Y')}.xlsx"
+        result_df.insert(0, "№", range(1, len(result_df) + 1))
+        result_df.to_excel(filename, sheet_name="Парсинг 400", index=False)
 
         # ---- кнопка скачивания ----
         with open(filename, "rb") as f:
@@ -117,7 +116,6 @@ def reports():
         # ---------------------------
 
         st.success(f"Отчет успешно сформирован! Сохранен как {filename}")
-        st.table(result_df.head(10))
 
     except Exception as e:
         st.error(f'Критическая ошибка при формировании отчета: {str(e)}')
@@ -125,9 +123,23 @@ def reports():
         if 'infoprice' in locals():
             infoprice.close()
 
-def settings():
-    st.sidebar.title('Настройки')
-    st.write("Здесь будут настройки системы")
+
+def api_report():
+    ts = datetime.datetime.now().strftime("%d%m%Y")
+    raw_file = Path(f"api_report_{ts}.xlsx")
+
+    with st.spinner("Идёт парсинг через API..."):
+        build_api_report(raw_file)
+
+    # пост-обработка
+    final_file = post_merge(raw_file)
+
+    if final_file.exists():
+        with open(final_file, "rb") as f:
+            st.download_button("📥 Скачать итоговый отчёт", f, final_file.name)
+        # опционально – удаляем промежуточные
+        raw_file.unlink(missing_ok=True)
+        final_file.unlink(missing_ok=True)
 
 # ----------  MAIN  ----------
 def main():
@@ -150,15 +162,29 @@ def main():
 
     menu = st.sidebar.radio(
         "Разделы",
-        ["Информация", "Отчеты", "Настройки"],
-        index=0
+        ["Информация", "Отчет ТОП 400", "Полный отчет"]
     )
+
+    # --------- динамическая кнопка ---------
     if menu == "Информация":
-        info()
-    elif menu == "Отчеты":
-        reports()
-    elif menu == "Настройки":
-        settings()
+        run_btn = st.sidebar.button("🔍 Искать", type="primary")
+
+    # для остальных отчётов
+    elif menu == "Отчет ТОП 400":
+        run_btn = st.sidebar.button("📊 Сделать", type="primary")
+    elif menu == "Полный отчет":
+        run_btn = st.sidebar.button("📦 Сделать", type="primary")
+    # ---------------------------------------
+
+    if run_btn:
+        if menu == "Информация":
+            info()
+        elif menu == "Отчет ТОП 400":
+            reports()
+        elif menu == "Полный отчет":
+            api_report()
+    else:
+        st.info("Выберите раздел и нажмите кнопку")
 
 if __name__ == '__main__':
     main()

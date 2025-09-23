@@ -105,3 +105,5 @@ Backup[ ]of[ ]*.key/
 Backup[ ]of[ ]*.numbers/
 
 user.txt
+*.xlsx
+!excel/*.xlsx
