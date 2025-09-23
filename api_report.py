@@ -107,61 +107,136 @@ def build_api_report(file_path: str):
     ]
     data_dict: dict = {}
 
+    # ---------- вспомогательные: запись строк ----------
+    def _store_row(row: tuple, cols: list, dd: dict) -> None:
+        gid = row[0]
+        if gid not in dd:
+            dd[gid] = {c: 0.0 for c in cols}
+            dd[gid]["good_id"], dd[gid]["category"], dd[gid]["subcategory"], dd[gid]["name"], dd[gid]["link"] = row[:5]
+        for idx, col in enumerate(cols[5:11], start=5):
+            dd[gid][col] = row[idx]
+
+    def _store_promo(row: tuple, cols: list, dd: dict) -> None:
+        gid = row[0]
+        if gid in dd:
+            for idx, col in enumerate(cols[11:], start=1):
+                dd[gid][col] = row[idx]
+
+    # ---------- 1 уровень – основные группы ----------
+    total_main = len(main_group)
+    for i, main_name in enumerate(main_group):
+        st.write(f"Обработка категории: **{main_name}**")
+        # 2 уровень – дочерние группы
+        for group in st_progress(
+            main_group[main_name][1],
+            desc=f"Категория {i+1}/{total_main}: {main_name}",
+            total=len(main_group[main_name][1]),
+        ):
+            gid = group["GoodsGroupId"]
+
+            # обычные цены (без progress по страницам)
+            price = get_price_group(gid, "")
+            if price is None:
+                continue
+            for page in range(price["Table"][0]["GeneralData"][0]["AmountPages"]):
+                data = get_price_group(gid, str(page))
+                if data is None:
+                    break
+                for goods in data["Table"]:
+                    if goods["GeneralData"][0]["AmountGoods"] and "GoodsOffer" in goods:
+                        for row in process_goods(goods, main_name, is_promo=False):
+                            _store_row(row, columns, data_dict)
+
+            # промо-цены (без progress по страницам)
+            price_promo = get_price_group(gid, "", is_promo=True)
+            if price_promo is None:
+                continue
+            for page in range(price_promo["Table"][0]["GeneralData"][0]["AmountPages"]):
+                data = get_price_group(gid, str(page), is_promo=True)
+                if data is None:
+                    break
+                for goods in data["Table"]:
+                    if goods["GeneralData"][0]["AmountGoods"] and "GoodsOffer" in goods:
+                        for row in process_goods(goods, main_name, is_promo=True):
+                            _store_promo(row, columns, data_dict)
+
+    # ---------- сохраняем ----------
+    df = pd.DataFrame(data_dict.values(), columns=columns)
     with pd.ExcelWriter(file_path, engine="openpyxl") as writer:
-        for main_name in main_group:
-            st.write(f"Обработка категории: **{main_name}**")
-            for group in st_progress(main_group[main_name][1], desc=f"Группы в {main_name}"):
-                gid = group["GoodsGroupId"]
-
-                # 1. обычные цены
-                price = get_price_group(gid, "")
-                if price is None:
-                    continue
-                for page in st_progress(
-                    range(price["Table"][0]["GeneralData"][0]["AmountPages"]),
-                    desc="Обычные цены",
-                ):
-                    data = get_price_group(gid, str(page))
-                    if data is None:
-                        break
-                    for goods in data["Table"]:
-                        if goods["GeneralData"][0]["AmountGoods"] and "GoodsOffer" in goods:
-                            for row in process_goods(goods, main_name):
-                                good_id = row[0]
-                                if good_id not in data_dict:
-                                    data_dict[good_id] = {col: 0.0 for col in columns}
-                                    (
-                                        data_dict[good_id]["good_id"],
-                                        data_dict[good_id]["category"],
-                                        data_dict[good_id]["subcategory"],
-                                        data_dict[good_id]["name"],
-                                        data_dict[good_id]["link"],
-                                    ) = row[:5]
-                                # заполняем цены
-                                for idx, col in enumerate(columns[5:11], start=5):
-                                    data_dict[good_id][col] = row[idx]
-
-                # 2. промо-цены
-                price_promo = get_price_group(gid, "", is_promo=True)
-                if price_promo is None:
-                    continue
-                for page in st_progress(
-                    range(price_promo["Table"][0]["GeneralData"][0]["AmountPages"]),
-                    desc="Промо-цены",
-                ):
-                    data = get_price_group(gid, str(page), is_promo=True)
-                    if data is None:
-                        break
-                    for goods in data["Table"]:
-                        if goods["GeneralData"][0]["AmountGoods"] and "GoodsOffer" in goods:
-                            for row in process_goods(goods, main_name, is_promo=True):
-                                good_id = row[0]
-                                if good_id in data_dict:
-                                    for idx, col in enumerate(columns[11:], start=1):
-                                        data_dict[good_id][col] = row[idx]
-
-        # сохраняем
-        df = pd.DataFrame(data_dict.values(), columns=columns)
         df.to_excel(writer, sheet_name="AllData", index=False)
 
     st.success(f"Файл сохранён: {file_path.name}")
+    
+# def build_api_report(file_path: str):
+#     """Построить полный отчёт и сохранить в file_path."""
+#     file_path = Path(file_path)
+
+#     main_group = get_main_group()
+#     if not main_group:
+#         st.stop()
+
+#     columns = [
+#         "good_id", "category", "subcategory", "name", "link",
+#         "sosedi", "sosedi_promo", "korona", "korona_promo", "gippo", "gippo_promo",
+#         "evroopt", "evroopt_promo", "santa", "santa_promo", "green", "green_promo",
+#     ]
+#     data_dict: dict = {}
+
+#     with pd.ExcelWriter(file_path, engine="openpyxl") as writer:
+#         for main_name in main_group:
+#             st.write(f"Обработка категории: **{main_name}**")
+#             for group in st_progress(main_group[main_name][1], desc=f"Группы в {main_name}"):
+#                 gid = group["GoodsGroupId"]
+
+#                 # 1. обычные цены
+#                 price = get_price_group(gid, "")
+#                 if price is None:
+#                     continue
+#                 for page in st_progress(
+#                     range(price["Table"][0]["GeneralData"][0]["AmountPages"]),
+#                     desc="Обычные цены",
+#                 ):
+#                     data = get_price_group(gid, str(page))
+#                     if data is None:
+#                         break
+#                     for goods in data["Table"]:
+#                         if goods["GeneralData"][0]["AmountGoods"] and "GoodsOffer" in goods:
+#                             for row in process_goods(goods, main_name):
+#                                 good_id = row[0]
+#                                 if good_id not in data_dict:
+#                                     data_dict[good_id] = {col: 0.0 for col in columns}
+#                                     (
+#                                         data_dict[good_id]["good_id"],
+#                                         data_dict[good_id]["category"],
+#                                         data_dict[good_id]["subcategory"],
+#                                         data_dict[good_id]["name"],
+#                                         data_dict[good_id]["link"],
+#                                     ) = row[:5]
+#                                 # заполняем цены
+#                                 for idx, col in enumerate(columns[5:11], start=5):
+#                                     data_dict[good_id][col] = row[idx]
+
+#                 # 2. промо-цены
+#                 price_promo = get_price_group(gid, "", is_promo=True)
+#                 if price_promo is None:
+#                     continue
+#                 for page in st_progress(
+#                     range(price_promo["Table"][0]["GeneralData"][0]["AmountPages"]),
+#                     desc="Промо-цены",
+#                 ):
+#                     data = get_price_group(gid, str(page), is_promo=True)
+#                     if data is None:
+#                         break
+#                     for goods in data["Table"]:
+#                         if goods["GeneralData"][0]["AmountGoods"] and "GoodsOffer" in goods:
+#                             for row in process_goods(goods, main_name, is_promo=True):
+#                                 good_id = row[0]
+#                                 if good_id in data_dict:
+#                                     for idx, col in enumerate(columns[11:], start=1):
+#                                         data_dict[good_id][col] = row[idx]
+
+#         # сохраняем
+#         df = pd.DataFrame(data_dict.values(), columns=columns)
+#         df.to_excel(writer, sheet_name="AllData", index=False)
+
+#     st.success(f"Файл сохранён: {file_path.name}")
