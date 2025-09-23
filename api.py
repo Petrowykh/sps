@@ -1,4 +1,4 @@
-headers = {
+HEADERS = {
     'Accept': '*/*',
     'Accept-Language': 'en-US,en;q=0.9,ru;q=0.8',
     'Connection': 'keep-alive',
@@ -15,6 +15,12 @@ headers = {
     'sec-ch-ua-platform': '"Linux"',
 }
 
-params = {
+PARAMS = {
     'v': '0',
 }
+
+API_URL = "https://api.infoprice.by/InfoPrice.Goods"
+
+def post_json(url: str, payload: str, timeout: int = 15):
+    import requests
+    return requests.post(url, params=PARAMS, headers=HEADERS, data=payload, timeout=timeout)

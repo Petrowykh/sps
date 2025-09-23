@@ -1,7 +1,7 @@
 import pandas as pd
 import requests
 import streamlit as st
-from api import headers, params
+from api import post_json, PARAMS, HEADERS
 from pathlib import Path
 import datetime
 
@@ -9,7 +9,7 @@ import datetime
 def get_main_group():
     try:
         data_group = '{"CRC":"","Packet":{"FromId":"10003001","ServerKey":"omt5W465fjwlrtxcEco97kew2dkdrorqqq","Data":{}}}'
-        response = requests.post('https://api.infoprice.by/InfoPrice.GoodsGroup', params=params, headers=headers, data=data_group)
+        response = requests.post('https://api.infoprice.by/InfoPrice.GoodsGroup', params=PARAMS, headers=HEADERS, data=data_group)
         response.raise_for_status()
         main_group = response.json()
         return {i['GoodsGroupName']: [i['GoodsGroupId'], i['Child']] for i in main_group['Table']}
@@ -23,14 +23,10 @@ def create_data_group(group_id, page="", is_promo=False):
     return data.encode()
 
 def get_price_group(group_id, page, is_promo=False):
-    try:
-        data_price = create_data_group(group_id, page=page, is_promo=is_promo)
-        response = requests.post('https://api.infoprice.by/InfoPrice.Goods', params=params, headers=headers, data=data_price)
-        response.raise_for_status()
-        return response.json()
-    except Exception as e:
-        st.write(f"Ошибка при получении {'промо-' if is_promo else ''}цен для группы {group_id}, страница {page}: {e}")
-        return None
+    data = create_data_group(group_id, page=page, is_promo=is_promo)
+    resp = post_json("https://api.infoprice.by/InfoPrice.Goods", data)
+    resp.raise_for_status()
+    return resp.json()
 
 def process_goods(goods, main_name, is_promo=False):
     processed_data = []

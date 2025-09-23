@@ -4,11 +4,9 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-import datetime, pathlib, gc
 from api_report import build_api_report, post_merge
 from pathlib import Path
-
-import myparser as mp
+from infoparser import get_price_by_barcode
 #import myutils as mu
 
 # ----------  AUTH  ----------
@@ -16,11 +14,7 @@ import myparser as mp
 LOGIN = "admin"
 PASSWORD = "12345"
 # ---------------------------------------------
-@st.cache_resource(show_spinner=False)
-def get_driver():
-    return mp.ParserInfoAll()
 
-driver = get_driver()
 
 def check_password(pw: str) -> bool:
     return pw == PASSWORD
@@ -35,29 +29,43 @@ def login_form():
             else:
                 st.error("Неверный пароль")
 
-# ----------  UI  ----------
+
 def info():
-    st.sidebar.title('Поиск товара')
-    barcode = st.sidebar.text_input('Введите ш/к')
-    if st.sidebar.button('Ищем'):
+
+    st.title("Поиск товара по штрих-коду")
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        barcode = st.text_input("Введите штрих-код", key="barcode_input")
+    with col2:
+        search = st.button("Искать", type="primary", key="search_btn")
+
+    if search and barcode.strip():          # нажали и ввели
         try:
-            with st.spinner('Ищем товар...'):
-                infoprice = driver
-                link = f'https://infoprice.by/?search= {barcode}&filter%5B%5D=72494&filter%5B%5D=72468&filter%5B%5D=72512&filter%5B%5D=72517&filter%5B%5D=72511&filter%5B%5D=72526'
-                st.text(link)
-                name, rrr, ddd = infoprice.get_price(link)
-                if name != 'Не найден':
-                    st.subheader(name)
-                    st.table(rrr)
-                    st.table(ddd)
+            with st.spinner("Ищем товар..."):
+                link = f"https://infoprice.by/?search={barcode.strip()}"
+                st.markdown(f"[Ссылка на сайт]({link})")
+
+                info = get_price_by_barcode(barcode.strip())
+                name, min_price, min_promo, shops = info.name, info.min_price, info.min_promo, info.shops
+
+                if name != "Не найден":
+                    st.success(f"**{name}**")
+                    c1, c2 = st.columns(2)
+                    c1.metric("Минимальная цена", f"{min_price:.2f} BYN")
+                    if min_promo and min_promo != min_price:
+                        c2.metric("Минимальная промо-цена", f"{min_promo:.2f} BYN")
+
+                    st.subheader("Цены по магазинам")
+                    st.dataframe(shops, width="stretch")
                 else:
-                    st.warning('Товар не найден')
-                infoprice.close()
+                    st.error("Товар не найден")
         except Exception as e:
-            st.error(f'Ошибка при поиске товара: {str(e)}')
+            st.error(f"Ошибка при поиске товара: {str(e)}")
+    elif search and not barcode.strip():    # нажали, но не ввели
+        st.warning("Введите штрих-код")
+
 
 def reports():
-
     try:
         sku = pd.read_excel('excel/new3.xlsx')
         if sku.empty:
@@ -73,21 +81,25 @@ def reports():
             'santa': [], 'korona': [], 'evroopt': [],
             'gippo': [], 'grin': []
         }
-        infoprice = driver
-        for count, barcode in enumerate(sku['barcode'].head(10)):
+
+        # --------------  HTTP-вариант  --------------
+
+        for count, barcode in enumerate(sku['barcode']):
             try:
                 parse_bar.progress(int((count + 1) / total_items * 100))
                 barcode = str(int(barcode)) if pd.notna(barcode) else '0'
-                link = f'https://infoprice.by/?search={barcode}&filter%5B%5D=72494&filter%5B%5D=72468&filter%5B%5D=72512&filter%5B%5D=72517&filter%5B%5D=72511&filter%5B%5D=72526'
-                info = infoprice.get_price(link)
+
+                info = get_price_by_barcode(barcode)
                 name, min_price, promo, rrr = info.name, info.min_price, info.min_promo, info.shops
-                print(f"{name}, {barcode}")
-                if name != 'Не найден':
+
+                if name != 'Не найдено':
                     result_dict['name'].append(name)
+                    link = f"https://infoprice.by/?search={barcode}"
                     result_dict['link_foto'].append(link)
-                    result_dict['min_price'].append(min_price)
+                    result_dict['min_price'].append(min_price)   # ← сюда пишем
                     result_dict['promo'].append(promo if promo != 10000.0 else 0.0)
                     result_dict['barcode'].append(barcode)
+
                     shops_mapping = {
                         'sosedi': 'Соседи', 'santa': 'Санта', 'korona': 'Корона',
                         'evroopt': 'Евроопт', 'gippo': 'Гиппо', 'grin': 'Грин'
@@ -99,13 +111,12 @@ def reports():
                 for key in result_dict:
                     result_dict[key].append(0.0 if key in ['min_price', 'promo', 'sosedi', 'santa', 'korona', 'evroopt', 'gippo', 'grin'] else '')
                 continue
-        infoprice.close()
+
         result_df = pd.DataFrame.from_dict(result_dict).fillna(0.0)
         filename = f"report_{datetime.now().strftime('%d%m%Y')}.xlsx"
         result_df.insert(0, "№", range(1, len(result_df) + 1))
         result_df.to_excel(filename, sheet_name="Парсинг 400", index=False)
 
-        # ---- кнопка скачивания ----
         with open(filename, "rb") as f:
             st.download_button(
                 label="📥 Скачать отчёт",
@@ -113,15 +124,10 @@ def reports():
                 file_name=filename,
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
-        # ---------------------------
-
         st.success(f"Отчет успешно сформирован! Сохранен как {filename}")
 
     except Exception as e:
         st.error(f'Критическая ошибка при формировании отчета: {str(e)}')
-    finally:
-        if 'infoprice' in locals():
-            infoprice.close()
 
 
 def api_report():
@@ -162,29 +168,22 @@ def main():
 
     menu = st.sidebar.radio(
         "Разделы",
-        ["Информация", "Отчет ТОП 400", "Полный отчет"]
+        ["Информация", "Отчет ТОП 400", "Полный отчет"],
+        key="main_menu",
     )
 
-    # --------- динамическая кнопка ---------
-    if menu == "Информация":
-        run_btn = st.sidebar.button("🔍 Искать", type="primary")
-
-    # для остальных отчётов
-    elif menu == "Отчет ТОП 400":
-        run_btn = st.sidebar.button("📊 Сделать", type="primary")
-    elif menu == "Полный отчет":
-        run_btn = st.sidebar.button("📦 Сделать", type="primary")
-    # ---------------------------------------
-
-    if run_btn:
-        if menu == "Информация":
-            info()
-        elif menu == "Отчет ТОП 400":
-            reports()
-        elif menu == "Полный отчет":
-            api_report()
+    # кнопка «Выполнить» – только для отчётов, для поиска – своя внутри info()
+    if menu != "Информация":
+        btn_text = {"Отчет ТОП 400": "📊 Сделать", "Полный отчет": "📦 Сделать"}.get(menu, "Выполнить")
+        if st.sidebar.button(btn_text, type="primary", key="exec_btn"):
+            if menu == "Отчет ТОП 400":
+                reports()
+            elif menu == "Полный отчет":
+                api_report()
     else:
-        st.info("Выберите раздел и нажмите кнопку")
+        info()
+    
+    
 
 if __name__ == '__main__':
     main()
