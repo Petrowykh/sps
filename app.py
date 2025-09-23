@@ -75,8 +75,9 @@ def reports():
             try:
                 parse_bar.progress(int((count + 1) / total_items * 100))
                 barcode = str(int(barcode)) if pd.notna(barcode) else '0'
-                link = f'https://infoprice.by/?search= {barcode}&filter%5B%5D=72494&filter%5B%5D=72468&filter%5B%5D=72512&filter%5B%5D=72517&filter%5B%5D=72511&filter%5B%5D=72526'
-                name, min_price, promo, rrr = infoprice.get_price(link)
+                link = f'https://infoprice.by/?search={barcode}&filter%5B%5D=72494&filter%5B%5D=72468&filter%5B%5D=72512&filter%5B%5D=72517&filter%5B%5D=72511&filter%5B%5D=72526'
+                info = infoprice.get_price(link)
+                name, min_price, promo, rrr = info.name, info.min_price, info.min_promo, info.shops
                 print(f"{name}, {barcode}")
                 if name != 'Не найден':
                     result_dict['name'].append(name)

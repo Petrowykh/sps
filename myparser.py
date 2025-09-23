@@ -85,26 +85,35 @@ class ParserInfoAll:
 
     # -------------------- основной метод --------------------
     def get_price(self, url: str) -> PriceInfo:
-        """Вернуть PriceInfo для переданного URL."""
         self.driver.get(url)
+        time.sleep(3)                       # ← даём странице прогрузиться
 
-        # 1. быстрая проверка «не найдено»
+        # 1. проверка «не найдено»
         if self._exists(_SEL_NOT_FOUND):
             return PriceInfo("Не найден", 0.0, 0.0, {})
 
-        # 2. название товара
-        name_el = self._get_one(_SEL_NAME)
-        if name_el is None:
+        # 2. название (как раньше)
+        try:
+            name_el = self.driver.find_element(By.CSS_SELECTOR, 'div.max-height')
+            name = name_el.text.strip()
+        except NoSuchElementException:
             return PriceInfo("Не найден", 0.0, 0.0, {})
-        name = name_el.text.strip()
 
-        # 3. обычные цены
-        shops, prices = self._parse_prices_grid()
+        # 3. сети и цены (как раньше, без ожиданий)
+        try:
+            nets  = self.driver.find_elements(By.XPATH, "//div[@class='logo']//img")[1:]
+            prices = self.driver.find_elements(By.CSS_SELECTOR, 'div.price-volume')
+            if not nets or not prices:
+                return PriceInfo("Не найден", 0.0, 0.0, {})
 
-        min_price = min(prices) if prices else 0.0
-        shops_dict = dict(zip(shops, prices))
+            list_price = [float(p.text) for p in prices]
+            list_net   = [n.get_attribute('alt') or 'unknown' for n in nets]
+            shops_dict = dict(zip(list_net, list_price))
+            min_price  = min(list_price)
+        except Exception:
+            return PriceInfo("Не найден", 0.0, 0.0, {})
 
-        # 4. промо-ценовой вариант той же страницы
+        # 4. промо (коротко)
         promo_min = self._parse_promo(url)
 
         return PriceInfo(name, min_price, promo_min, shops_dict)
