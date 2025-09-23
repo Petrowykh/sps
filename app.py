@@ -131,7 +131,7 @@ def reports():
 
 
 def api_report():
-    ts = datetime.datetime.now().strftime("%d%m%Y")
+    ts = datetime.now().strftime("%d%m%Y")
     raw_file = Path(f"api_report_{ts}.xlsx")
 
     with st.spinner("Идёт парсинг через API..."):
