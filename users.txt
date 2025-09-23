@@ -1,2 +1,0 @@
-demo:123
-user1:qwerty
