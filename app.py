@@ -98,8 +98,20 @@ def reports():
         result_df = pd.DataFrame.from_dict(result_dict).fillna(0.0)
         filename = f"report_{datetime.now().strftime('%d%m%Y_%H%M')}.xlsx"
         result_df.to_excel(filename)
+
+        # ---- кнопка скачивания ----
+        with open(filename, "rb") as f:
+            st.download_button(
+                label="📥 Скачать отчёт",
+                data=f,
+                file_name=filename,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+        # ---------------------------
+
         st.success(f"Отчет успешно сформирован! Сохранен как {filename}")
         st.table(result_df.head(10))
+
     except Exception as e:
         st.error(f'Критическая ошибка при формировании отчета: {str(e)}')
     finally:
