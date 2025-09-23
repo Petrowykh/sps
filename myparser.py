@@ -10,7 +10,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Tuple
 
-from selenium import webdriver
 from selenium.common.exceptions import NoSuchElementException, TimeoutException
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
@@ -19,6 +18,8 @@ from selenium.webdriver.remote.webelement import WebElement
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.common.keys import Keys
+import selenium.webdriver as webdriver
 
 # ---------- настройки ----------
 SITE_URL = "https://infoprice.by/"
@@ -65,23 +66,37 @@ class ParserInfoAll:
         self.driver = webdriver.Chrome(service=service, options=options)
 
         self._wait = WebDriverWait(self.driver, TIMEOUT)
-        self._init_start_page()
+        self.driver = None
+        self._start_browser() 
 
     # -------------------- входная точка --------------------
-    def _init_start_page(self) -> None:
-        """Прожать кнопку «Принять» на стартовой странице."""
-        self.driver.get(SITE_URL)
-        try:
-            search_form = self._wait.until(EC.element_to_be_clickable(_SEL_SEARCH_FORM))
-            self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", search_form)
-            search_form.click()
+    def _start_browser(self):
+        if self.driver:                # если уже был – закрываем
+            self.driver.quit()
+        options = webdriver.ChromeOptions()
+        options.add_argument("--headless=new")
+        options.add_argument("--no-sandbox")
+        options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("--disable-gpu")
+        options.add_argument("--disable-extensions")
+        options.add_argument("--disable-images")        # ← не грузим картинки
+        options.add_argument("--disable-javascript")    # ← если JS не нужен
+        options.add_argument("--memory-pressure-off")
+        options.add_argument("--max_old_space_size=256") 
+        prefs = {"profile.managed_default_content_settings.images": 2}
+        options.add_experimental_option("prefs", prefs)
 
-            btn = self._wait.until(EC.element_to_be_clickable(_SEL_BTN_PRIMARY))
-            btn.click()
-            log.info("Стартовая инициализация пройдена")
-        except TimeoutException as exc:
-            self._dump_page("init_error")
-            raise RuntimeError("Не удалось пройти стартовую инициализацию") from exc
+        service = Service(ChromeDriverManager().install())
+        self.driver = webdriver.Chrome(service=service, options=options)
+
+    def reload_tab(self):
+        """Переиспользуем ту же вкладку без перезапуска процесса."""
+        self.driver.get("about:blank")          # чистим DOM
+        time.sleep(0.2)
+
+    def close(self):
+        if self.driver:
+            self.driver.quit()
 
     # -------------------- основной метод --------------------
     def get_price(self, url: str) -> PriceInfo:

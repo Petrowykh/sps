@@ -14,6 +14,11 @@ import myparser as mp
 LOGIN = "admin"
 PASSWORD = "12345"
 # ---------------------------------------------
+@st.cache_resource(show_spinner=False)
+def get_driver():
+    return mp.ParserInfoAll()
+
+driver = get_driver()
 
 def check_password(pw: str) -> bool:
     return pw == PASSWORD
@@ -35,7 +40,7 @@ def info():
     if st.sidebar.button('Ищем'):
         try:
             with st.spinner('Ищем товар...'):
-                infoprice = mp.ParserInfoAll()
+                infoprice = driver
                 link = f'https://infoprice.by/?search= {barcode}&filter%5B%5D=72494&filter%5B%5D=72468&filter%5B%5D=72512&filter%5B%5D=72517&filter%5B%5D=72511&filter%5B%5D=72526'
                 st.text(link)
                 name, rrr, ddd = infoprice.get_price(link)
@@ -51,8 +56,8 @@ def info():
 
 def reports():
     st.sidebar.title('Отчеты')
-    type_report = st.sidebar.selectbox('Выберите отчет', ('TOP-1000', 'CTM'))
-    email = st.sidebar.text_input('Введите email', placeholder='email@mail.ru')
+    # type_report = st.sidebar.selectbox('Выберите отчет', ('TOP-1000', 'CTM'))
+    # email = st.sidebar.text_input('Введите email', placeholder='email@mail.ru')
     if not st.sidebar.button('Сформировать'):
         return
     try:
@@ -70,8 +75,8 @@ def reports():
             'santa': [], 'korona': [], 'evroopt': [],
             'gippo': [], 'grin': []
         }
-        infoprice = mp.ParserInfoAll()
-        for count, barcode in enumerate(sku['barcode']):
+        infoprice = driver
+        for count, barcode in enumerate(sku['barcode'].head(10)):
             try:
                 parse_bar.progress(int((count + 1) / total_items * 100))
                 barcode = str(int(barcode)) if pd.notna(barcode) else '0'
@@ -96,6 +101,7 @@ def reports():
                 for key in result_dict:
                     result_dict[key].append(0.0 if key in ['min_price', 'promo', 'sosedi', 'santa', 'korona', 'evroopt', 'gippo', 'grin'] else '')
                 continue
+        infoprice.close()
         result_df = pd.DataFrame.from_dict(result_dict).fillna(0.0)
         filename = f"report_{datetime.now().strftime('%d%m%Y_%H%M')}.xlsx"
         result_df.to_excel(filename)
