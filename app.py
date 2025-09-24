@@ -140,10 +140,32 @@ def api_report():
 def main():
     st.set_page_config(
         page_title="Sosedi Parsing System",
-        page_icon="🧊",
+        page_icon="🛒",
         layout="wide",
         initial_sidebar_state="expanded",
+        menu_items={
+            'Get Help': 'mailto:a.petrowykh@gmail.com',
+            'About': "Система парсинга данных"
+        }
     )
+
+    # Кастомный CSS
+    st.markdown("""
+    <style>
+        .main-header {
+            font-size: 2.5rem;
+            color: #1f77b4;
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+        .success-box {
+            padding: 1rem;
+            border-radius: 0.5rem;
+            background-color: #d4edda;
+            border: 1px solid #c3e6cb;
+        }
+    </style>
+    """, unsafe_allow_html=True)
 
     # если пользователь ещё не авторизован – показываем форму
     if not st.session_state.get("auth", False):
@@ -153,7 +175,6 @@ def main():
     # авторизован – рисуем шапку и меню-переключалку
     col_img, col_header = st.columns([1, 2])
     col_img.image('img/logo.png', width=200)
-    col_header.header('Система парсинга данных')
 
     menu = st.sidebar.radio(
         "Разделы",

@@ -1,7 +1,3 @@
-"""
-myparser.py  –  HTTP-only версия (без Chrome)
-python -m pip install requests
-"""
 from __future__ import annotations
 
 import logging

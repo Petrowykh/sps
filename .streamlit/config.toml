@@ -1,0 +1,5 @@
+[server]
+headless = true          # убирает всё верхнее меню (Deploy, ≡, «Run», «Settings»)
+
+[theme]
+base = "dark" 
