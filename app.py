@@ -133,19 +133,8 @@ def reports():
 def api_report():
     ts = datetime.now().strftime("%d%m%Y")
     raw_file = Path(f"api_report_{ts}.xlsx")
-
-    with st.spinner("Идёт парсинг через API..."):
-        build_api_report(raw_file)
-
-    # пост-обработка
-    final_file = post_merge(raw_file)
-
-    if final_file.exists():
-        with open(final_file, "rb") as f:
-            st.download_button("📥 Скачать итоговый отчёт", f, final_file.name)
-        # опционально – удаляем промежуточные
-        raw_file.unlink(missing_ok=True)
-        final_file.unlink(missing_ok=True)
+    
+    build_api_report(raw_file)
 
 # ----------  MAIN  ----------
 def main():
