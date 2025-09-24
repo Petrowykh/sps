@@ -53,7 +53,7 @@ def info():
                     if min_promo and min_promo != min_price:
                         c2.metric("Минимальная промо-цена", f"{min_promo:.2f} BYN")
                     st.subheader("Цены по магазинам")
-                    st.dataframe(shops, use_container_width=True)
+                    st.dataframe(shops, width="stretch")
                 else:
                     st.error("Товар не найден")
         except Exception as e:
@@ -70,7 +70,6 @@ def _load_products() -> pd.DataFrame:
 def reports():
     st.session_state[LOCK_KEY] = True
     try:
-        # ... ваш существующий код reports() полностью без изменений ...
         with st.spinner("📊 Загружаем данные..."):
             sku = _load_products()
         if sku.empty:
@@ -131,18 +130,16 @@ def reports():
                     data=f,
                     file_name=filename,
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True
+                    width="stretch"
                 )
         with st.expander("📊 Статистика по магазинам"):
             shop_cols = ['sosedi', 'santa', 'korona', 'evroopt', 'gippo', 'grin']
             stats = {shop.title(): f"{(result_df[shop] > 0).sum()} товаров" for shop in shop_cols}
             stats_df = pd.DataFrame(list(stats.items()), columns=['Магазин', 'Найдено товаров'])
-            st.dataframe(stats_df, use_container_width=True)
+            st.dataframe(stats_df, width="stretch")
     except Exception as e:
         st.error(f'🚨 Критическая ошибка: {str(e)}')
-    finally:
-        st.session_state[LOCK_KEY] = False
-        st.rerun()
+
 
 def api_report():
     st.session_state[LOCK_KEY] = True
