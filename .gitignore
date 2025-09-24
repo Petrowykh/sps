@@ -106,4 +106,5 @@ Backup[ ]of[ ]*.numbers/
 
 user.txt
 *.xlsx
-!excel/*.xlsx
+excel/*.xlsx
+build_db.py

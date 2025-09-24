@@ -338,28 +338,42 @@ def st_progress(iterable, *, desc=None, total=None):
         yield item
         bar.progress((i + 1) / total)
 
+import sqlite3
+import pandas as pd
+import datetime
+from pathlib import Path
+import streamlit as st
+
 def post_merge(src_file: Path | str) -> Path:
-    """Пост-обработка данных"""
+    """Пост-обработка данных: подтягиваем штрих-коды из БД-таблицы `barcode` по совпадению `name`"""
     src_file = Path(src_file)
-    const_file = Path("excel/ready_bc_main.xlsx")
+    db_file  = Path("products.db")
 
     if not src_file.exists():
         st.error(f"Не найден исходный файл: {src_file}")
         return src_file
 
-    if not const_file.exists():
-        st.error(f"Не найден файл-константа: {const_file}")
+    if not db_file.exists():
+        st.error(f"Не найдена БД: {db_file}")
         return src_file
 
+    # 1. основной Excel-файл
     df_main = pd.read_excel(src_file)
-    df_bc = pd.read_excel(const_file)
 
+    # 2. справочник штрих-кодов из таблицы `barcode` (name, barcode)
+    with sqlite3.connect(db_file, check_same_thread=False) as conn:
+        df_bc = pd.read_sql("SELECT name, barcode FROM barcode", conn)
+
+    # 3. мерж
     df = pd.merge(df_main, df_bc, how="left", on="name")
-    if 'Unnamed: 0' in df.columns:
-        df = df.drop(columns=['Unnamed: 0'])
+
+    # убираем служебные колонки
+    df = df.loc[:, ~df.columns.str.contains("^Unnamed: 0$")]
+
+    # 4. сохраняем
     ts = datetime.datetime.now().strftime("%d%m%Y_%H%M")
     out_file = src_file.with_name(f"full{ts}.xlsx")
-    df.to_excel(out_file, index=False)  # Убедитесь что index=False
+    df.to_excel(out_file, index=False)
 
     st.success(f"Post-merge завершён: {out_file.name}")
     return out_file
