@@ -9,9 +9,24 @@ import sqlite3, os, sys
 from streamlit_option_menu import option_menu
 from loguru import logger
 from notification.events import notify_login, notify_report_start, notify_report_complete, notify_download, notify_error
+from dotenv import load_dotenv
+
+# Пытаемся загрузить из разных источников
+def load_config():
+    load_dotenv()
+    
+    password = os.getenv('SPS_PASSWORD')
+    if password:
+        logger.info("Password loaded from environment variables")
+        return password
+    
+    # 4. Если ничего не найдено
+    logger.error("SPS_PASSWORD not found in any source")
+    return None
 
 # ----------  AUTH  ----------
-PASSWORD = os.getenv('SPS_PASSWORD')
+LOGIN = "admin"
+PASSWORD = load_config()
 DB_FILE = "products.db"
 # ----------------------------
 def setup_logger():
@@ -92,17 +107,42 @@ def _load_products() -> pd.DataFrame:
         return pd.read_sql("SELECT barcode, name FROM top", c)
 
 # ----------  REPORTS  ----------
+
 def reports():
+    # Показываем предупреждение перед началом
+    st.warning("""
+    ⚠️ **Внимание! Идет процесс парсинга данных**
+    
+    - Не закрывайте эту страницу
+    - Не переходите по другим пунктам меню  
+    - Не обновляйте страницу
+    - Процесс может занять несколько минут
+    """)
+    
+    # Добавляем индикатор прогресса для всего процесса
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
     try:
+        # Обновляем статус
+        status_text.info("🔄 Подготовка к формированию отчета ТОП 400...")
+        progress_bar.progress(10)
+        
         # Уведомление о начале отчета
         notify_report_start("ТОП 400")
         logger.info("TOP 400 report generation started")
         
-        sku = _load_products()
+        with st.spinner("📊 Загружаем данные..."):
+            sku = _load_products()
+            progress_bar.progress(20)
+        
         if sku.empty:
             logger.warning("Database is empty")
             st.warning("⚠️ База данных пуста")
             return
+        
+        status_text.info("🔍 Начинаем парсинг данных...")
+        progress_bar.progress(30)
         col1, col2, col3 = st.columns(3)
         with col1:
             st.metric("📦 Всего товаров", f"{sku.shape[0]:,}")
@@ -120,9 +160,9 @@ def reports():
             'gippo': [], 'grin': []
         }
         for count, (_, row) in enumerate(sku.iterrows()):
-            progress = int((count + 1) / total_items * 100)
-            progress_container.progress(progress)
-            status_text.text(f"🔍 Обрабатывается товар {count + 1} из {total_items}...")
+            progress = 30 + (count / len(sku)) * 60  # от 30% до 90%
+            progress_bar.progress(int(progress))
+            status_text.info(f"🔍 Обрабатывается товар {count + 1} из {len(sku)}...")
             barcode = str(int(row['barcode'])) if pd.notna(row['barcode']) else '0'
             try:
                 info = get_price_by_barcode(barcode)
@@ -172,71 +212,81 @@ def reports():
             stats_df = pd.DataFrame(list(stats.items()), columns=['Магазин', 'Найдено товаров'])
             st.dataframe(stats_df, width="stretch")
     except Exception as e:
+        progress_bar.progress(100)
+        status_text.error("❌ Произошла ошибка!")
         error_msg = str(e)
         notify_error(error_msg, "TOP 400 Report")
         logger.error(f"TOP 400 report error: {error_msg}")
         st.error(f'🚨 Критическая ошибка: {error_msg}')
 
 
+
 def api_report():
+    # Показываем предупреждение перед началом
+    st.warning("""
+    ⚠️ **Внимание! Идет процесс сбора полного отчета**
+    
+    - Не закрывайте эту страницу
+    - Не переходите по другим пунктам меню
+    - Не обновляйте страницу  
+    - Процесс может занять 10-30 минут
+    - Это собираются данные по ВСЕМ товарам
+    """)
+    
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
     try:
+        status_text.info("🔄 Подготовка к формированию полного отчета...")
+        progress_bar.progress(10)
+        
         notify_report_start("Полный отчет")
         logger.info("Full report generation started")
+        
+        status_text.info("🌐 Подключаемся к API...")
+        progress_bar.progress(20)
+        
         result = build_api_report()
         if result is None:
-            st.error("Не удалось собрать данные")
-            return
-            
-        with st.spinner("💾 Сохранение данных..."):
-            ts = datetime.now().strftime("%d%m%Y")
-            raw_filename = f"full_report_{ts}.xlsx"
-            
-            df = pd.DataFrame(result['data'].values(), columns=result['columns'])
-            df.to_excel(raw_filename, index=False)
-            st.success(f"✅ Сырые данные сохранены: {raw_filename}")
-
-        with st.spinner("🔧 Пост-обработка данных..."):
-            try:
-                final_file = post_merge(Path(raw_filename))
-                st.success(f"✅ Финальный файл готов!")
-                file_size = Path(final_file).stat().st_size
-                notify_report_complete("Полный отчет", file_size)
-                logger.success(f"Full report completed: {final_file}")
-            except Exception as e:
-                st.error(f"❌ Ошибка пост-обработки: {e}")
-                return
-
-        st.subheader("📊 Итоговая статистика")
-        stats = result['stats']
-        col1, col2, col3, col4 = st.columns(4)
+            raise Exception("Failed to collect data")
         
-        with col1:
-            st.metric("Товаров собрано", f"{stats['total_products']:,}")
-        with col2:
-            st.metric("Успешных групп", stats['successful_groups'])
-        with col3:
-            st.metric("Групп с ошибками", stats['failed_groups'])
-        with col4:
-            st.metric("Общий прогресс", f"{stats['successful_groups']}/{stats['total_groups']}")
-
-        st.subheader("📥 Скачивание результатов")
+        status_text.info("💾 Сохраняем сырые данные...")
+        progress_bar.progress(70)
+            
+        ts = datetime.now().strftime("%d%m%Y")
+        raw_filename = f"full_report_{ts}.xlsx"
+        
+        df = pd.DataFrame(result['data'].values(), columns=result['columns'])
+        df.to_excel(raw_filename, index=False)
+        
+        status_text.info("🔧 Выполняем пост-обработку...")
+        progress_bar.progress(80)
+        
+        final_file = post_merge(Path(raw_filename))
+        
+        progress_bar.progress(100)
+        status_text.success("✅ Полный отчет успешно сформирован!")
+        
+        file_size = Path(final_file).stat().st_size
+        notify_report_complete("Полный отчет", file_size)
+        logger.success(f"Full report completed: {final_file}")
+        
         with open(final_file, "rb") as file:
             file_data = file.read()
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
-            st.download_button(
-                label="📥 Скачать финальный отчет",
+            if st.download_button(
+                label="📥 Скачать полный отчет",
                 data=file_data,
                 file_name=final_file.name,
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
                 type="primary"
-            )
-            notify_download(final_file.name, "Полный отчет")
-            logger.info(f"Full report downloaded: {final_file.name}")
-        st.info(f"**Файл:** {final_file.name}")
+            ):
+                notify_download(final_file.name, "Полный отчет")
+                logger.info(f"Full report downloaded: {final_file.name}")
         
     except Exception as e:
+        progress_bar.progress(100)
+        status_text.error("❌ Произошла ошибка!")
         error_msg = str(e)
         notify_error(error_msg, "Full Report")
         logger.error(f"Full report error: {error_msg}")

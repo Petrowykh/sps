@@ -1,9 +1,11 @@
 import requests
 import os
 from loguru import logger
+from dotenv import load_dotenv
 
 class TelegramNotifier:
     def __init__(self):
+        load_dotenv()
         self.bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
         self.chat_id = os.getenv('TELEGRAM_CHAT_ID')
         self.enabled = bool(self.bot_token and self.chat_id)
