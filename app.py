@@ -11,7 +11,7 @@ from loguru import logger
 from notification.events import notify_login, notify_report_start, notify_report_complete, notify_download, notify_error
 
 # ----------  AUTH  ----------
-PASSWORD = os.getenv('SPS_PASSWORD', '12345')
+PASSWORD = os.getenv('SPS_PASSWORD')
 DB_FILE = "products.db"
 # ----------------------------
 def setup_logger():
