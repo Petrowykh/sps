@@ -378,10 +378,8 @@ def post_merge(src_file: Path | str) -> Path:
     st.success(f"Post-merge завершён: {out_file.name}")
     return out_file
 
-def build_api_report(file_path: str):
-    """Построение отчета с улучшенной обработкой ошибок"""
-    file_path = Path(file_path)
-    
+def build_api_report():
+    """Только сбор данных, без сохранения и постобработки"""
     st.header("📊 Сбор данных с API InfoPrice")
     st.write("⏰ Процесс может занять несколько минут...")
     
@@ -389,13 +387,12 @@ def build_api_report(file_path: str):
     with st.spinner("Проверка доступности API..."):
         try:
             test_response = requests.get('https://api.infoprice.by', timeout=10)
-            if test_response.status_code == 200:
-                st.success("✅ API доступен")
-            else:
-                st.warning(f"⚠️ API возвращает статус: {test_response.status_code}")
+            if test_response.status_code != 200:
+                st.error("❌ API недоступен")
+                return None
         except:
             st.error("❌ API недоступен. Проверьте подключение к интернету.")
-            return
+            return None
 
     # Получаем группы
     with st.spinner("Получение списка категорий..."):
@@ -403,14 +400,14 @@ def build_api_report(file_path: str):
     
     if not main_group:
         st.error("Не удалось получить данные о группах товаров")
-        return
+        return None
 
     # Фильтруем проблемные группы
     main_group = skip_problematic_groups(main_group)
     
     if not main_group:
         st.error("После фильтрации не осталось групп для обработки")
-        return
+        return None
 
     columns = [
         "good_id", "category", "subcategory", "name", "link",
@@ -419,29 +416,27 @@ def build_api_report(file_path: str):
     ]
     data_dict = {}
 
-    total_main = len(main_group)
+    total_groups = sum(len(children) for _, children in main_group.values())
+    current_group = 0
     successful_groups = 0
     failed_groups = 0
-    total_groups = sum(len(children) for _, children in main_group.values())
 
-    # Элементы интерфейса
+    # Прогресс-бар
     progress_bar = st.progress(0)
     status_text = st.empty()
-    stats_text = st.empty()
 
     st.subheader("📋 Обработка категорий:")
     
-    current_group = 0
     for i, main_name in enumerate(main_group.keys()):
-        with st.expander(f"Категория {i+1}/{total_main}: {main_name}", expanded=False):
+        with st.expander(f"Категория {i+1}/{len(main_group)}: {main_name}", expanded=False):
             children = main_group[main_name][1]
             
-            for j, group in enumerate(children):
+            for group in children:
                 current_group += 1
                 gid = group["GoodsGroupId"]
                 gname = group.get("GoodsGroupName", f"Группа {gid}")
                 
-                # Прогресс
+                # Обновляем прогресс
                 progress = current_group / total_groups
                 progress_bar.progress(progress)
                 status_text.text(f"Обработка: {gname} ({current_group}/{total_groups})")
@@ -449,77 +444,35 @@ def build_api_report(file_path: str):
                 # Обработка группы
                 try:
                     success = safe_process_group(gid, gname, main_name, data_dict, columns)
+                    if success:
+                        successful_groups += 1
+                    else:
+                        failed_groups += 1
                 except Exception as e:
-                    st.error(f" ❌ Необработанная ошибка: {e}")
-                    success = False
-                
-                if success:
-                    successful_groups += 1
-                else:
+                    st.error(f"❌ Ошибка: {e}")
                     failed_groups += 1
                 
-                # Статистика
-                stats_text.text(f"""
-                📊 Статистика обработки:
-                ✅ Успешных групп: {successful_groups}
-                ❌ Ошибок: {failed_groups}  
-                📦 Товаров собрано: {len(data_dict):,}
-                ⏳ Прогресс: {current_group}/{total_groups} ({progress:.1%})
-                """)
-                
-                # Принудительное обновление интерфейса
                 time.sleep(0.1)
 
-    # Убираем элементы прогресса после завершения
+    # Убираем элементы прогресса
     progress_bar.empty()
     status_text.empty()
     
-    # Сохранение результатов
     if data_dict:
-        st.subheader("💾 Сохранение результатов...")
-        try:
-            df = pd.DataFrame(data_dict.values(), columns=columns)
-            with pd.ExcelWriter(file_path, engine="openpyxl") as writer:
-                df.to_excel(writer, sheet_name="AllData", index=False)
-            
-            st.success(f"✅ Файл успешно сохранён: {file_path.name}")
-            st.info(f"""
-            **Итоговая статистика:**
-            - Обработано товаров: {len(data_dict):,}
-            - Успешных групп: {successful_groups}
-            - Групп с ошибками: {failed_groups}
-            - Всего групп: {total_groups}
-            - Прогресс: {current_group}/{total_groups} групп обработано
-            """)
-            
-            # Автоматическая пост-обработка
-            st.subheader("🔧 Автоматическая пост-обработка...")
-            with st.spinner("Выполняется пост-обработка данных..."):
-                try:
-                    final_file = post_merge(file_path)
-                    st.success(f"✅ Финальный файл готов!")
-                    
-                    # Ссылка для скачивания
-                    with open(final_file, "rb") as file:
-                        file_data = file.read()
-                    
-                    st.download_button(
-                        label="📥 Скачать финальный файл",
-                        data=file_data,
-                        file_name=final_file.name,
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        type="primary"
-                    )
-                    
-                    st.info(f"**Файл:** {final_file.name}")
-                    
-                except Exception as e:
-                    st.error(f"❌ Ошибка при пост-обработке: {e}")
-                    
-        except Exception as e:
-            st.error(f"❌ Ошибка сохранения: {e}")
+        st.success(f"✅ Сбор данных завершен! Обработано товаров: {len(data_dict):,}")
+        return {
+            'data': data_dict,
+            'columns': columns,
+            'stats': {
+                'total_products': len(data_dict),
+                'successful_groups': successful_groups,
+                'failed_groups': failed_groups,
+                'total_groups': total_groups
+            }
+        }
     else:
         st.error("❌ Не удалось собрать данные.")
+        return None
 
 def safe_build_api_report(file_path: str):
     """Безопасная обертка"""
