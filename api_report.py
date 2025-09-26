@@ -4,58 +4,17 @@ import streamlit as st
 from api import post_json, PARAMS, HEADERS
 from pathlib import Path
 import datetime
-import time
+import time, sqlite3
 import logging
-import threading
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-class TimeoutException(Exception):
-    pass
-
-def timeout_handler():
-    raise TimeoutException("Таймаут операции")
-
-def run_with_timeout(func, timeout_seconds, *args, **kwargs):
-    """Выполняет функцию с таймаутом"""
-    with ThreadPoolExecutor(max_workers=1) as executor:
-        future = executor.submit(func, *args, **kwargs)
-        try:
-            return future.result(timeout=timeout_seconds)
-        except FutureTimeoutError:
-            raise TimeoutException(f"Таймаут после {timeout_seconds} секунд")
-
-# Глобальная сессия с повторными попытками
-def create_session():
-    """Создает сессию с повторными попытками и таймаутами"""
-    session = requests.Session()
-    
-    from requests.adapters import HTTPAdapter
-    from urllib3.util.retry import Retry
-    
-    retry_strategy = Retry(
-        total=2,
-        backoff_factor=1,
-        status_forcelist=[429, 500, 502, 503, 504],
-        allowed_methods=["POST"]
-    )
-    
-    adapter = HTTPAdapter(max_retries=retry_strategy)
-    session.mount("http://", adapter)
-    session.mount("https://", adapter)
-    
-    return session
-
-# Создаем глобальную сессию
-SESSION = create_session()
-
 def get_main_group():
     try:
         data_group = '{"CRC":"","Packet":{"FromId":"10003001","ServerKey":"omt5W465fjwlrtxcEco97kew2dkdrorqqq","Data":{}}}'
-        response = SESSION.post('https://api.infoprice.by/InfoPrice.GoodsGroup', params=PARAMS, headers=HEADERS, data=data_group, timeout=30)
+        response = requests.post('https://api.infoprice.by/InfoPrice.GoodsGroup', params=PARAMS, headers=HEADERS, data=data_group, timeout=30)
         response.raise_for_status()
         main_group = response.json()
         return {i['GoodsGroupName']: [i['GoodsGroupId'], i['Child']] for i in main_group['Table']}
@@ -69,53 +28,14 @@ def create_data_group(group_id, page="", is_promo=False):
     return data.encode()
 
 def get_price_group(group_id, page, is_promo=False):
-    """Получение данных группы с улучшенной обработкой ошибок"""
-    max_retries = 2
-    base_timeout = 45
-    
-    for attempt in range(max_retries):
-        try:
-            data = create_data_group(group_id, page=page, is_promo=is_promo)
-            timeout = base_timeout * (attempt + 1)
-            
-            response = SESSION.post(
-                'https://api.infoprice.by/InfoPrice.Goods', 
-                params=PARAMS, 
-                headers=HEADERS, 
-                data=data,
-                timeout=timeout
-            )
-            response.raise_for_status()
-            return response.json()
-            
-        except requests.exceptions.Timeout:
-            if attempt == max_retries - 1:
-                st.error(f"Таймаут после {max_retries} попыток для группы {group_id}, страница {page}")
-                raise
-            else:
-                wait_time = 3 * (attempt + 1)
-                st.warning(f"Таймаут попытка {attempt + 1}/{max_retries}. Ждем {wait_time} сек...")
-                time.sleep(wait_time)
-                
-        except requests.exceptions.ConnectionError:
-            if attempt == max_retries - 1:
-                st.error(f"Ошибка соединения после {max_retries} попыток для группы {group_id}")
-                raise
-            else:
-                wait_time = 5 * (attempt + 1)
-                st.warning(f"Ошибка соединения попытка {attempt + 1}/{max_retries}. Ждем {wait_time} сек...")
-                time.sleep(wait_time)
-                
-        except Exception as e:
-            if attempt == max_retries - 1:
-                st.error(f"Ошибка после {max_retries} попыток для группы {group_id}: {e}")
-                raise
-            else:
-                wait_time = 2 * (attempt + 1)
-                st.warning(f"Ошибка попытка {attempt + 1}/{max_retries}. Ждем {wait_time} сек...")
-                time.sleep(wait_time)
-    
-    return None
+    try:
+        data_price = create_data_group(group_id, page=page, is_promo=is_promo)
+        response = requests.post('https://api.infoprice.by/InfoPrice.Goods', params=PARAMS, headers=HEADERS, data=data_price, timeout=60)
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        st.error(f"Ошибка при получении {'промо-' if is_promo else ''}цен для группы {group_id}, страница {page}: {e}")
+        return None
 
 def process_goods(goods, main_name, is_promo=False):
     processed_data = []
@@ -124,51 +44,37 @@ def process_goods(goods, main_name, is_promo=False):
         return processed_data
         
     for data_good in goods['GoodsOffer']:
-        goods_group_name = data_good.get('GoodsGroupName', '')
-        goods_name = data_good.get('GoodsName', '').rstrip()
-        goods_id = data_good.get('GoodsId', '')
-        
-        if not goods_id:
+        try:
+            goods_group_name = data_good.get('GoodsGroupName', '')
+            goods_name = data_good.get('GoodsName', '').rstrip()
+            goods_id = data_good.get('GoodsId', '')
+            
+            if not goods_id:
+                continue
+                
+            prices = {72494: 0.00, 72512: 0.00, 72511: 0.00, 72517: 0.00, 72468: 0.00, 72526: 0.00}
+            
+            if 'Offers' in data_good and data_good['Offers']:
+                for price_contractor in data_good['Offers']:
+                    contractor_id = price_contractor.get('ContractorId')
+                    if contractor_id in prices:
+                        if not is_promo or (is_promo and price_contractor.get('IsPromotionalPrice', False)):
+                            try:
+                                prices[contractor_id] = float(price_contractor.get('Price', 0))
+                            except:
+                                prices[contractor_id] = 0.00
+            
+            link = 'https://infoprice.by/?search=' + "+".join(goods_name.split(" "))
+            
+            if is_promo:
+                processed_data.append((goods_id, *prices.values()))
+            else:
+                processed_data.append((goods_id, main_name, goods_group_name, goods_name, link, *prices.values()))
+                
+        except Exception as e:
+            st.warning(f"Ошибка обработки товара: {e}")
             continue
             
-        prices = {72494: 0.00, 72512: 0.00, 72511: 0.00, 72517: 0.00, 72468: 0.00, 72526: 0.00}
-        has_any_price = False
-        has_promo_price = False
-        
-        if 'Offers' in data_good and data_good['Offers']:
-            for price_contractor in data_good['Offers']:
-                contractor_id = price_contractor.get('ContractorId')
-                if contractor_id in prices:
-                    price_value = float(price_contractor.get('Price', 0))
-                    is_promo_price = price_contractor.get('IsPromotionalPrice', False)
-                    
-                    if not is_promo:
-                        # Для обычного запроса - берем все цены
-                        prices[contractor_id] = price_value
-                        if price_value > 0:
-                            has_any_price = True
-                    else:
-                        # Для промо-запроса - берем только промо-цены
-                        if is_promo_price:
-                            prices[contractor_id] = price_value
-                            has_promo_price = True
-        
-        # Для обычного режима: добавляем если есть хотя бы одна цена
-        if not is_promo:
-            if not has_any_price:
-                continue
-        # Для промо-режима: добавляем только если есть промо-цены
-        else:
-            if not has_promo_price:
-                continue
-        
-        link = 'https://infoprice.by/?search=' + "+".join(goods_name.split(" "))
-        
-        if is_promo:
-            processed_data.append((goods_id, *prices.values()))
-        else:
-            processed_data.append((goods_id, main_name, goods_group_name, goods_name, link, *prices.values()))
-    
     return processed_data
 
 def safe_get_pages_count(data):
@@ -193,193 +99,8 @@ def safe_get_goods_data(data):
     except (IndexError, KeyError, TypeError):
         pass
 
-def _store_row(row: tuple, cols: list, dd: dict) -> None:
-    gid = row[0]
-    if gid not in dd:
-        dd[gid] = {c: 0.0 for c in cols}
-        dd[gid]["good_id"], dd[gid]["category"], dd[gid]["subcategory"], dd[gid]["name"], dd[gid]["link"] = row[:5]
-    for idx, col in enumerate(cols[5:11], start=5):
-        dd[gid][col] = row[idx]
-
-def _store_promo(row: tuple, cols: list, dd: dict) -> None:
-    gid = row[0]
-    # Добавляем промо-цены ТОЛЬКО если товар уже существует
-    if gid in dd:
-        for idx, col in enumerate(cols[11:], start=1):
-            # Обновляем только если промо-цена не нулевая
-            if row[idx] > 0:
-                dd[gid][col] = row[idx]
-
-def safe_process_group(gid, gname, main_name, data_dict, columns):
-    """Обработка группы с защитой от зависаний"""
-    
-    def process_single_group(group_id, group_name, is_promo=False):
-        """Обработка одной группы (обычные или промо цены)"""
-        try:
-            # Получаем общую информацию с таймаутом
-            general_data = run_with_timeout(
-                get_price_group, 120, group_id, "", is_promo
-            )
-            
-            if not general_data:
-                return 0
-                
-            pages_count = safe_get_pages_count(general_data)
-            if pages_count == 0:
-                return 0
-            
-            processed_goods = 0
-            
-            # Обрабатываем страницы с индивидуальными таймаутами
-            for page in range(pages_count):
-                try:
-                    page_data = run_with_timeout(
-                        get_price_group, 180, group_id, str(page), is_promo
-                    )
-                    
-                    if page_data:
-                        for goods in safe_get_goods_data(page_data):
-                            rows = process_goods(goods, main_name, is_promo)
-                            for row in rows:
-                                if is_promo:
-                                    # Для промо-цен добавляем ТОЛЬКО если товар уже есть в словаре
-                                    _store_promo(row, columns, data_dict)
-                                else:
-                                    # Для обычных цен добавляем новый товар
-                                    _store_row(row, columns, data_dict)
-                            processed_goods += len(rows)
-                    
-                    # Прогресс внутри группы
-                    if pages_count > 5 and page % 5 == 0:
-                        st.write(f"  📄 Обработано {page + 1}/{pages_count} страниц")
-                    
-                    # Пауза между страницами
-                    if page < pages_count - 1:
-                        time.sleep(0.3)
-                        
-                except TimeoutException:
-                    st.error(f"  ⏰ Таймаут страницы {page}. Пропускаем остальные.")
-                    break
-                except Exception as e:
-                    st.warning(f"  ⚠️ Ошибка страницы {page}: {e}")
-                    continue
-                    
-            return processed_goods
-            
-        except TimeoutException:
-            st.error(f"  ❌ Таймаут получения данных для {group_name}")
-            return 0
-        except Exception as e:
-            st.error(f"  ❌ Ошибка обработки {group_name}: {e}")
-            return 0
-    
-    try:
-        st.write(f" 🔄 Обработка группы: {gname}")
-        start_time = time.time()
-        
-        # Обрабатываем обычные цены (ВСЕ товары)
-        regular_count = process_single_group(gid, f"{gname} (обычные)", is_promo=False)
-        
-        # Пауза между типами цен
-        time.sleep(0.5)
-        
-        # Обрабатываем промо-цены (ТОЛЬКО для товаров, которые уже есть в словаре)
-        promo_count = process_single_group(gid, f"{gname} (промо)", is_promo=True)
-        
-        end_time = time.time()
-        processing_time = end_time - start_time
-        
-        st.write(f" ✅ Группа {gname} обработана: {regular_count} обычных + {promo_count} промо товаров (время: {processing_time:.1f}с)")
-        return True
-        
-    except TimeoutException:
-        st.error(f" ⏰ Общий таймаут группы {gname}. Пропускаем.")
-        return False
-    except Exception as e:
-        st.error(f" ❌ Критическая ошибка группы {gname}: {e}")
-        return False
-
-def skip_problematic_groups(main_group):
-    """Пропускает известные проблемные группы"""
-    # 3507 - проблемная группа из предыдущих ошибок
-    # 3516 - Хозяйственные товары (последняя зависшая группа)
-    skipped_ids = ['3507', '3516']
-    
-    filtered_groups = {}
-    skipped_count = 0
-    
-    for name, (gid, children) in main_group.items():
-        filtered_children = []
-        for child in children:
-            if str(child['GoodsGroupId']) in skipped_ids:
-                skipped_count += 1
-                st.warning(f"Пропускаем проблемную группу: {child.get('GoodsGroupName', 'Unknown')} (ID: {child['GoodsGroupId']})")
-                continue
-            filtered_children.append(child)
-        
-        if filtered_children:
-            filtered_groups[name] = [gid, filtered_children]
-    
-    if skipped_count > 0:
-        st.info(f"Автоматически пропущено проблемных групп: {skipped_count}")
-    
-    return filtered_groups
-
-def st_progress(iterable, *, desc=None, total=None):
-    """Прогресс-бар для Streamlit"""
-    if total is None:
-        total = len(iterable) if hasattr(iterable, "__len__") else 100
-
-    bar = st.progress(0)
-    if desc:
-        st.text(desc)
-
-    for i, item in enumerate(iterable):
-        yield item
-        bar.progress((i + 1) / total)
-
-import sqlite3
-import pandas as pd
-import datetime
-from pathlib import Path
-import streamlit as st
-
-def post_merge(src_file: Path | str) -> Path:
-    """Пост-обработка данных: подтягиваем штрих-коды из БД-таблицы `barcode` по совпадению `name`"""
-    src_file = Path(src_file)
-    db_file  = Path("products.db")
-
-    if not src_file.exists():
-        st.error(f"Не найден исходный файл: {src_file}")
-        return src_file
-
-    if not db_file.exists():
-        st.error(f"Не найдена БД: {db_file}")
-        return src_file
-
-    # 1. основной Excel-файл
-    df_main = pd.read_excel(src_file)
-
-    # 2. справочник штрих-кодов из таблицы `barcode` (name, barcode)
-    with sqlite3.connect(db_file, check_same_thread=False) as conn:
-        df_bc = pd.read_sql("SELECT name, barcode FROM barcode", conn)
-
-    # 3. мерж
-    df = pd.merge(df_main, df_bc, how="left", on="name")
-
-    # убираем служебные колонки
-    df = df.loc[:, ~df.columns.str.contains("^Unnamed: 0$")]
-
-    # 4. сохраняем
-    ts = datetime.datetime.now().strftime("%d%m%Y_%H%M")
-    out_file = src_file.with_name(f"full{ts}.xlsx")
-    df.to_excel(out_file, index=False)
-
-    st.success(f"Post-merge завершён: {out_file.name}")
-    return out_file
-
 def build_api_report():
-    """Только сбор данных, без сохранения и постобработки"""
+    """Сбор данных с API InfoPrice"""
     st.header("📊 Сбор данных с API InfoPrice")
     st.write("⏰ Процесс может занять несколько минут...")
     
@@ -402,71 +123,173 @@ def build_api_report():
         st.error("Не удалось получить данные о группах товаров")
         return None
 
-    # Фильтруем проблемные группы
-    main_group = skip_problematic_groups(main_group)
-    
-    if not main_group:
-        st.error("После фильтрации не осталось групп для обработки")
-        return None
+    # Тестовый режим
+    # if st.toggle("🔧 Тестовый режим (3 категории)", value=True):
+    #     main_group = dict(list(main_group.items())[:3])
+    #     st.info(f"🔧 Тестовый режим: обрабатывается {len(main_group)} категорий")
 
     columns = [
-        "good_id", "category", "subcategory", "name", "link",
-        "sosedi", "sosedi_promo", "korona", "korona_promo", "gippo", "gippo_promo",
-        "evroopt", "evroopt_promo", "santa", "santa_promo", "green", "green_promo",
+        'good_id', 'category', 'subcategory', 'name', 'link',
+        'sosedi', 'sosedi_promo', 'korona', 'korona_promo', 
+        'gippo', 'gippo_promo', 'evroopt', 'evroopt_promo', 
+        'santa', 'santa_promo', 'green', 'green_promo'
     ]
+    
     data_dict = {}
-
     total_groups = sum(len(children) for _, children in main_group.values())
     current_group = 0
-    successful_groups = 0
-    failed_groups = 0
 
-    # Прогресс-бар
-    progress_bar = st.progress(0)
-    status_text = st.empty()
+    # Основной прогресс-бар для всех групп
+    main_progress_bar = st.progress(0)
+    main_status_text = st.empty()
 
     st.subheader("📋 Обработка категорий:")
     
-    for i, main_name in enumerate(main_group.keys()):
-        with st.expander(f"Категория {i+1}/{len(main_group)}: {main_name}", expanded=False):
+    for main_name in main_group.keys():
+        with st.expander(f"Категория: {main_name}", expanded=False):
             children = main_group[main_name][1]
             
             for group in children:
                 current_group += 1
-                gid = group["GoodsGroupId"]
-                gname = group.get("GoodsGroupName", f"Группа {gid}")
+                group_id = group['GoodsGroupId']
+                group_name = group.get('GoodsGroupName', f'Группа {group_id}')
                 
-                # Обновляем прогресс
+                # Обновляем основной прогресс
                 progress = current_group / total_groups
-                progress_bar.progress(progress)
-                status_text.text(f"Обработка: {gname} ({current_group}/{total_groups})")
+                main_progress_bar.progress(progress)
+                main_status_text.text(f"Обработка: {group_name} ({current_group}/{total_groups})")
                 
-                # Обработка группы
+                st.write(f"🔄 Обработка группы: {group_name}")
+                
                 try:
-                    success = safe_process_group(gid, gname, main_name, data_dict, columns)
-                    if success:
-                        successful_groups += 1
-                    else:
-                        failed_groups += 1
-                except Exception as e:
-                    st.error(f"❌ Ошибка: {e}")
-                    failed_groups += 1
-                
-                time.sleep(0.1)
+                    # Обработка обычных цен
+                    price_data = get_price_group(group_id, "")
+                    if price_data is None:
+                        st.warning(f"Пропускаем группу {group_name} из-за ошибки")
+                        continue
 
-    # Убираем элементы прогресса
-    progress_bar.empty()
-    status_text.empty()
+                    pages_count = safe_get_pages_count(price_data)
+                    if pages_count == 0:
+                        st.write(f" ℹ️ Нет данных в группе {group_name}")
+                        continue
+
+                    # Прогресс-бар для страниц обычных цен
+                    st.write(f" 📄 Обычные цены: {pages_count} страниц")
+                    page_progress_bar = st.progress(0)
+                    page_status = st.empty()
+                    
+                    regular_count = 0
+                    for page in range(pages_count):
+                        page_status.text(f"Страница {page + 1}/{pages_count}")
+                        page_progress_bar.progress((page + 1) / pages_count)
+                        
+                        prices_page = get_price_group(group_id, str(page))
+                        if prices_page is None:
+                            st.warning(f"Пропускаем страницу {page} группы {group_name}")
+                            continue
+
+                        for goods in safe_get_goods_data(prices_page):
+                            processed_data = process_goods(goods, main_name)
+                            for row in processed_data:
+                                good_id = row[0]
+                                if good_id not in data_dict:
+                                    data_dict[good_id] = {col: 0.00 for col in columns}
+                                    data_dict[good_id]['good_id'] = good_id
+                                    data_dict[good_id]['category'] = row[1]
+                                    data_dict[good_id]['subcategory'] = row[2]
+                                    data_dict[good_id]['name'] = row[3]
+                                    data_dict[good_id]['link'] = row[4]
+                                
+                                # Обновляем обычные цены
+                                data_dict[good_id]['sosedi'] = row[5]
+                                data_dict[good_id]['korona'] = row[6]
+                                data_dict[good_id]['gippo'] = row[7]
+                                data_dict[good_id]['evroopt'] = row[8]
+                                data_dict[good_id]['santa'] = row[9]
+                                data_dict[good_id]['green'] = row[10]
+                                regular_count += 1
+
+                        # Небольшая пауза между страницами
+                        time.sleep(0.1)
+                    
+                    # Убираем прогресс-бар страниц
+                    page_progress_bar.empty()
+                    page_status.empty()
+
+                    # Обработка промо-цен
+                    promo_count = 0
+                    price_promo_data = get_price_group(group_id, "", is_promo=True)
+                    if price_promo_data:
+                        promo_pages_count = safe_get_pages_count(price_promo_data)
+                        
+                        if promo_pages_count > 0:
+                            st.write(f" 🎯 Промо-цены: {promo_pages_count} страниц")
+                            promo_progress_bar = st.progress(0)
+                            promo_status = st.empty()
+                            
+                            for page in range(promo_pages_count):
+                                promo_status.text(f"Промо страница {page + 1}/{promo_pages_count}")
+                                promo_progress_bar.progress((page + 1) / promo_pages_count)
+                                
+                                prices_promo_page = get_price_group(group_id, str(page), is_promo=True)
+                                if prices_promo_page is None:
+                                    continue
+
+                                for goods in safe_get_goods_data(prices_promo_page):
+                                    processed_promo_data = process_goods(goods, main_name, is_promo=True)
+                                    for row in processed_promo_data:
+                                        good_id = row[0]
+                                        if good_id in data_dict:  # Обновляем только существующие товары
+                                            data_dict[good_id]['sosedi_promo'] = row[1]
+                                            data_dict[good_id]['korona_promo'] = row[2]
+                                            data_dict[good_id]['gippo_promo'] = row[3]
+                                            data_dict[good_id]['evroopt_promo'] = row[4]
+                                            data_dict[good_id]['santa_promo'] = row[5]
+                                            data_dict[good_id]['green_promo'] = row[6]
+                                            promo_count += 1
+
+                                # Небольшая пауза между страницами
+                                time.sleep(0.1)
+                            
+                            # Убираем прогресс-бар промо-страниц
+                            promo_progress_bar.empty()
+                            promo_status.empty()
+
+                    st.success(f" ✅ Группа {group_name} обработана: {regular_count} обычных + {promo_count} промо")
+
+                except Exception as e:
+                    st.error(f" ❌ Ошибка обработки группы {group_name}: {e}")
+                    continue
+                
+                time.sleep(0.5)  # Пауза между группами
+
+    # Убираем основные элементы прогресса
+    main_progress_bar.empty()
+    main_status_text.empty()
     
     if data_dict:
         st.success(f"✅ Сбор данных завершен! Обработано товаров: {len(data_dict):,}")
+        
+        # Показываем статистику
+        st.subheader("📈 Статистика по магазинам:")
+        stats_data = []
+        shops = ['sosedi', 'korona', 'gippo', 'evroopt', 'santa', 'green']
+        for shop in shops:
+            shop_count = sum(1 for product in data_dict.values() if product.get(shop, 0) > 0)
+            promo_count = sum(1 for product in data_dict.values() if product.get(f"{shop}_promo", 0) > 0)
+            stats_data.append({
+                'Магазин': shop,
+                'Товаров с обычными ценами': shop_count,
+                'Товаров с промо ценами': promo_count
+            })
+        
+        st.dataframe(pd.DataFrame(stats_data))
+        
         return {
             'data': data_dict,
             'columns': columns,
             'stats': {
                 'total_products': len(data_dict),
-                'successful_groups': successful_groups,
-                'failed_groups': failed_groups,
                 'total_groups': total_groups
             }
         }
@@ -474,12 +297,33 @@ def build_api_report():
         st.error("❌ Не удалось собрать данные.")
         return None
 
-def safe_build_api_report(file_path: str):
-    """Безопасная обертка"""
-    try:
-        build_api_report(file_path)
-    except KeyboardInterrupt:
-        st.warning("⚠️ Процесс прерван пользователем")
-    except Exception as e:
-        st.error(f"❌ Критическая ошибка: {e}")
-        logger.error(f"Критическая ошибка: {e}")
+def post_merge(src_file: Path | str) -> Path:
+    """Пост-обработка данных: подтягиваем штрих-коды"""
+    src_file = Path(src_file)
+    db_file = Path("products.db")
+
+    if not src_file.exists():
+        st.error(f"Не найден исходный файл: {src_file}")
+        return src_file
+
+    if not db_file.exists():
+        st.error(f"Не найдена БД: {db_file}")
+        return src_file
+
+    # Чтение данных
+    df_main = pd.read_excel(src_file)
+    
+    with sqlite3.connect(db_file, check_same_thread=False) as conn:
+        df_bc = pd.read_sql("SELECT name, barcode FROM barcode", conn)
+
+    # Объединение
+    df = pd.merge(df_main, df_bc, how="left", on="name")
+    df = df.loc[:, ~df.columns.str.contains("^Unnamed: 0$")]
+
+    # Сохранение
+    ts = datetime.datetime.now().strftime("%d%m%Y_%H%M")
+    out_file = src_file.with_name(f"full{ts}.xlsx")
+    df.to_excel(out_file, index=False)
+
+    st.success(f"Post-merge завершён: {out_file.name}")
+    return out_file

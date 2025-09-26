@@ -233,41 +233,44 @@ def api_report():
     - Это собираются данные по ВСЕМ товарам
     """)
     
-    progress_bar = st.progress(0)
     status_text = st.empty()
+    
+    # Переменные для хранения путей к файлам
+    raw_filename = None
+    final_file = None
     
     try:
         status_text.info("🔄 Подготовка к формированию полного отчета...")
-        progress_bar.progress(10)
         
         notify_report_start("Полный отчет")
         logger.info("Full report generation started")
         
         status_text.info("🌐 Подключаемся к API...")
-        progress_bar.progress(20)
         
         result = build_api_report()
         if result is None:
             raise Exception("Failed to collect data")
         
         status_text.info("💾 Сохраняем сырые данные...")
-        progress_bar.progress(70)
             
         ts = datetime.now().strftime("%d%m%Y")
-        raw_filename = f"full_report_{ts}.xlsx"
+        raw_filename = Path(f"full_report_{ts}.xlsx")
         
         df = pd.DataFrame(result['data'].values(), columns=result['columns'])
         df.to_excel(raw_filename, index=False)
         
         status_text.info("🔧 Выполняем пост-обработку...")
-        progress_bar.progress(80)
         
-        final_file = post_merge(Path(raw_filename))
+        final_file = post_merge(raw_filename)
         
-        progress_bar.progress(100)
+        # Удаляем сырой файл после успешной пост-обработки
+        if raw_filename.exists():
+            raw_filename.unlink()
+            logger.info(f"Raw file deleted: {raw_filename}")
+        
         status_text.success("✅ Полный отчет успешно сформирован!")
         
-        file_size = Path(final_file).stat().st_size
+        file_size = final_file.stat().st_size
         notify_report_complete("Полный отчет", file_size)
         logger.success(f"Full report completed: {final_file}")
         
@@ -283,9 +286,24 @@ def api_report():
             ):
                 notify_download(final_file.name, "Полный отчет")
                 logger.info(f"Full report downloaded: {final_file.name}")
+                
+                # Удаляем финальный файл после скачивания
+                if final_file.exists():
+                    final_file.unlink()
+                    logger.info(f"Final file deleted: {final_file}")
         
     except Exception as e:
-        progress_bar.progress(100)
+        # В случае ошибки также пытаемся удалить временные файлы
+        try:
+            if raw_filename and raw_filename.exists():
+                raw_filename.unlink()
+                logger.info(f"Raw file deleted after error: {raw_filename}")
+            if final_file and final_file.exists():
+                final_file.unlink()
+                logger.info(f"Final file deleted after error: {final_file}")
+        except Exception as cleanup_error:
+            logger.warning(f"Cleanup error: {cleanup_error}")
+        
         status_text.error("❌ Произошла ошибка!")
         error_msg = str(e)
         notify_error(error_msg, "Full Report")
